@@ -1,0 +1,23 @@
+# Build artifacts
+duck-pet
+DesktopDuck.app/
+
+# User data (never commit)
+duck-config.json
+chat-history.json
+journal.json
+pet-thoughts.json
+pet-response.json
+pet-inbox.txt
+pet-inbox-state.json
+.pet-reply.pid
+duck-prefs.json
+
+# Custom generated images
+duck-custom/
+
+# macOS
+.DS_Store
+*.swp
+*.bak
+*.log

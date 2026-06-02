@@ -1,0 +1,22 @@
+{
+  "scale": 2.0,
+  "windowLevel": 2,
+  "idleGifPath": "",
+  "bubbleWidth": 240,
+  "bubbleMaxHeight": 200,
+  "maxVisible": 3,
+  "bubbleTimeout": 0,
+  "chatHistoryPath": "~/.workbuddy/chat-history.json",
+  "contextWindow": 10,
+  "compressThreshold": 20,
+  "user_name": "",
+  "ai_name": "Duck",
+  "journalTemplate": "🧭 Odyssey Plan",
+  "agentSync": true,
+  "llmApiKey": "YOUR_MINIMAX_API_KEY",
+  "llmModel": "MiniMax-M2.7",
+  "llmUrl": "https://api.minimax.io/v1/chat/completions",
+  "minimax_api_key": "YOUR_MINIMAX_API_KEY",
+  "minimax_url": "https://api.minimax.io/v1/chat/completions",
+  "model": "MiniMax-M2.7"
+}
