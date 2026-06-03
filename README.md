@@ -49,6 +49,15 @@ Describe any character — pixel cat, robot, slime — and the AI generates a fu
 
 ## Quick Start
 
+### Homebrew (recommended)
+
+```bash
+brew tap shiyangzheng/tap
+brew install --cask desktop-duck
+```
+
+### Manual Install
+
 ```bash
 # Compile the Swift app
 swiftc -o duck-pet duck-pet.swift -framework AppKit -framework Foundation
@@ -60,15 +69,8 @@ cp duck-pet 小鸭子.app/Contents/MacOS/
 cp pet-*.py 小鸭子.app/Contents/Resources/
 cp duck-idle.gif capybara.gif 小鸭子.app/Contents/Resources/
 
-# Create minimal Info.plist (see launch.sh for reference)
-
 # Open it
 open 小鸭子.app
-```
-
-Alternatively, use the provided launch script:
-```bash
-./launch.sh
 ```
 
 ## Configuration
