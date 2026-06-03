@@ -4,6 +4,36 @@ A desktop pet app for macOS — a floating window with an AI-powered duck (or ca
 
 ![Desktop Pet](screenshots/pet.png)
 
+## Quick Start
+
+### Homebrew (recommended)
+
+```bash
+brew tap shiyangzheng/tap
+brew install --cask desktop-duck
+```
+
+### Download from GitHub Releases
+
+Download the latest `DesktopDuck-v*.app.zip` from [Releases](https://github.com/ShiyangZheng/DesktopDuck/releases), unzip, and drag `DesktopDuck.app` to `/Applications`.
+
+### Manual Install from Source
+
+```bash
+# Compile the Swift app
+swiftc -o duck-pet duck-pet.swift -framework AppKit -framework Foundation
+
+# Bundle into an .app
+mkdir -p 小鸭子.app/Contents/MacOS
+mkdir -p 小鸭子.app/Contents/Resources
+cp duck-pet 小鸭子.app/Contents/MacOS/
+cp pet-*.py 小鸭子.app/Contents/Resources/
+cp duck-idle.gif capybara.gif 小鸭子.app/Contents/Resources/
+
+# Open it
+open 小鸭子.app
+```
+
 ## 🆕 v1.2 — Group Chat
 
 ![Group Chat](group_chat.jpg)
@@ -47,35 +77,7 @@ Describe any character — pixel cat, robot, slime — and the AI generates a fu
 ### Journal
 ![Journal](screenshots/journal.png)
 
-## Quick Start
 
-### Homebrew (recommended)
-
-```bash
-brew tap shiyangzheng/tap
-brew install --cask desktop-duck
-```
-
-### Download from GitHub Releases
-
-Download the latest `DesktopDuck-v*.app.zip` from [Releases](https://github.com/ShiyangZheng/DesktopDuck/releases), unzip, and drag `DesktopDuck.app` to `/Applications`.
-
-### Manual Install from Source
-
-```bash
-# Compile the Swift app
-swiftc -o duck-pet duck-pet.swift -framework AppKit -framework Foundation
-
-# Bundle into an .app
-mkdir -p 小鸭子.app/Contents/MacOS
-mkdir -p 小鸭子.app/Contents/Resources
-cp duck-pet 小鸭子.app/Contents/MacOS/
-cp pet-*.py 小鸭子.app/Contents/Resources/
-cp duck-idle.gif capybara.gif 小鸭子.app/Contents/Resources/
-
-# Open it
-open 小鸭子.app
-```
 
 ## Configuration
 
