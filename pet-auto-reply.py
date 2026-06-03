@@ -31,7 +31,8 @@ def release_lock():
 
 def get_config():
     cfg = {'api_key': None, 'url': 'https://api.minimax.io/v1/chat/completions', 'model': 'MiniMax-M2.7',
-           'journal_prompt': '', 'user_name': '', 'ai_name': 'Duck'}
+           'journal_prompt': '', 'user_name': '', 'ai_name': 'Duck',
+           'llm_provider': 'minimax', 'local_server_port': 8090}
     for key in ['MINIMAX_API_KEY', 'OPENAI_API_KEY']:
         if os.environ.get(key): cfg['api_key'] = os.environ[key]; break
     if CONFIG_FILE.exists():
@@ -43,6 +44,8 @@ def get_config():
             cfg['journal_prompt'] = d.get('journalPrompt', '')
             cfg['user_name'] = d.get('user_name', '')
             cfg['ai_name'] = d.get('ai_name', 'Duck')
+            cfg['llm_provider'] = d.get('llmProvider', 'minimax')
+            cfg['local_server_port'] = d.get('localServerPort', 8090)
         except Exception: pass
     return cfg
 
@@ -65,12 +68,37 @@ def set_state(n: int, history: list):
     }))
 
 def call_llm(config: dict, messages: list, max_tokens=256, temperature=0.8) -> str | None:
+    # Route to local LLM if configured
+    if config.get('llm_provider') == 'local':
+        return call_local_llm(config, messages, max_tokens, temperature)
+
     payload = json.dumps({'model': config['model'], 'messages': messages,
         'max_tokens': max_tokens, 'temperature': temperature, 'stream': False}).encode()
     req = urllib.request.Request(config['url'], data=payload,
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {config["api_key"]}'})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            content = data['choices'][0]['message']['content'].strip()
+            if content.startswith('<think>') and '</think>' in content:
+                content = content.split('</think>', 1)[1].strip()
+            return content
+    except Exception as e:
+        return None
+
+def call_local_llm(config: dict, messages: list, max_tokens=256, temperature=0.8) -> str | None:
+    """Call local llama-server via OpenAI-compatible API."""
+    port = config.get('local_server_port', 8090)
+    url = f'http://127.0.0.1:{port}/v1/chat/completions'
+    payload = json.dumps({
+        'messages': messages,
+        'max_tokens': max_tokens,
+        'temperature': temperature,
+        'stream': False,
+    }).encode()
+    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
             content = data['choices'][0]['message']['content'].strip()
             if content.startswith('<think>') and '</think>' in content:

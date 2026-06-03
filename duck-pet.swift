@@ -127,6 +127,10 @@ class Config: NSObject {
         ["name": "Duck", "personality": "cheerful and energetic", "thinking": "optimistic"],
         ["name": "Capybara", "personality": "calm and wise", "thinking": "analytical"]
     ]
+    var llmProvider: String = "minimax"   // "minimax" | "openai" | "anthropic" | "deepseek" | "local"
+    var localModelName: String = "Qwen/Qwen2.5-7B-Instruct-GGUF"
+    var localServerPort: Int = 8090
+    var localModelDir: String = NSHomeDirectory() + "/.workbuddy/models/"
     var bubbleTextWidth: CGFloat { bubbleWidth - 52 }
 
     override init() { super.init(); load() }
@@ -162,6 +166,10 @@ class Config: NSObject {
         if let v = j["h"] as? Double { windowH = CGFloat(v) }
         if let v = j["groupChatEnabled"] as? Bool { groupChatEnabled = v }
         if let v = j["groupPets"] as? [[String: String]] { groupPets = v }
+        if let v = j["llmProvider"] as? String { llmProvider = v }
+        if let v = j["localModelName"] as? String { localModelName = v }
+        if let v = j["localServerPort"] as? Int { localServerPort = v }
+        if let v = j["localModelDir"] as? String { localModelDir = v }
     }
 
     func save() {
@@ -177,6 +185,10 @@ class Config: NSObject {
             "petType": petType,
             "groupChatEnabled": groupChatEnabled,
             "groupPets": groupPets,
+            "llmProvider": llmProvider,
+            "localModelName": localModelName,
+            "localServerPort": localServerPort,
+            "localModelDir": localModelDir,
         ]
         if !llmApiKey.isEmpty { j["minimax_api_key"] = llmApiKey }
         if !idleGifPath.isEmpty { j["idleGifPath"] = idleGifPath }
@@ -1168,6 +1180,12 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var onApply:(()->Void)?
     var genPreview: NSImageView!, genStatus: NSTextField!, genSpinner: NSProgressIndicator!
     var genPrompt: NSTextField!, genButton: NSButton!
+    // Local LLM
+    var llmProviderPopup: NSPopUpButton!, localModelField: NSTextField!
+    var localDownloadBtn: NSButton!, localStartBtn: NSButton!, localStopBtn: NSButton!
+    var localStatusLabel: NSTextField!, localProgress: NSProgressIndicator!
+    var localDirField: NSTextField!
+    var keyLinkBtn: NSButton!, hfLinkBtn: NSButton!
 
     convenience init() {
         let w:CGFloat = 460, h:CGFloat = 850
@@ -1183,7 +1201,7 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let w = sz.width
         let sv = NSScrollView(frame:NSRect(x:0,y:0,width:w,height:sz.height))
         sv.drawsBackground = false; sv.hasVerticalScroller = true; sv.borderType  = .noBorder; sv.autohidesScrollers = true
-        let m:CGFloat = 24; let body = NSView(frame:NSRect(x:0,y:0,width:w,height:1800)); var y:CGFloat = 1780
+        let m:CGFloat = 24; let body = NSView(frame:NSRect(x:0,y:0,width:w,height:2050)); var y:CGFloat = 2030
 
         @discardableResult func sec(_ t:String)->NSTextField {
             let lb = NSTextField(frame:NSRect(x:m,y:y-20,width:w-m*2,height:20))
@@ -1245,6 +1263,12 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         editorBtn.target = self; editorBtn.action = #selector(openSpritesheetEditor)
         y -= 44; body.addSubview(editorBtn)
 
+        let gcBtn = NSButton(frame:NSRect(x:m,y:y-30,width:w-m*2,height:30))
+        gcBtn.title = "💬 Group Chat"
+        gcBtn.bezelStyle = .rounded; gcBtn.font = .systemFont(ofSize:13, weight:.medium)
+        gcBtn.target = self; gcBtn.action = #selector(openGroupChatBtn)
+        y -= 44; body.addSubview(gcBtn)
+
         // Names
         sec("Personalization")
         func mkNameField(_ label:String, _ value:String) -> NSTextField {
@@ -1300,6 +1324,42 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         // LLM
         sec("AI Model")
+        // Provider row with key link
+        let provLabelRow = NSView(frame: NSRect(x: m, y: y-14, width: w-m*2, height: 14))
+        let provLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 60, height: 14))
+        provLabel.stringValue = "Provider"; provLabel.isBezeled = false
+        provLabel.drawsBackground = false; provLabel.isEditable = false
+        provLabel.font = .systemFont(ofSize: 10); provLabel.textColor = .secondaryLabelColor
+        provLabelRow.addSubview(provLabel)
+
+        keyLinkBtn = NSButton(frame: NSRect(x: 65, y: -1, width: 200, height: 14))
+        keyLinkBtn.attributedTitle = NSAttributedString(string: "Get API Key →", attributes: [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ])
+        keyLinkBtn.isBordered = false; keyLinkBtn.target = self
+        keyLinkBtn.action = #selector(openProviderKeyLink)
+        provLabelRow.addSubview(keyLinkBtn)
+        y -= 18; body.addSubview(provLabelRow)
+
+        llmProviderPopup = NSPopUpButton(frame: NSRect(x: m, y: y-22, width: 280, height: 22), pullsDown: false)
+        llmProviderPopup.addItems(withTitles: [
+            "MiniMax", "OpenAI", "Anthropic", "DeepSeek",
+            "Google AI Studio", "xAI (Grok)", "Mistral AI", "Cohere",
+            "Meta / Together", "Azure OpenAI", "Groq",
+            "SiliconFlow (硅基流动)", "Zhipu (智谱)", "Alibaba Bailian (百炼)",
+            "Baidu (ERNIE)", "Moonshot (Kimi)", "OpenRouter",
+            "Local (llama.cpp)", "Custom"
+        ])
+        let pi = ["minimax","openai","anthropic","deepseek","google","xai","mistral","cohere",
+                  "meta","azure","groq","siliconflow","zhipu","bailian","baidu","moonshot",
+                  "openrouter","local","custom"]
+            .firstIndex(of: cfg.llmProvider) ?? 0
+        llmProviderPopup.selectItem(at: pi)
+        llmProviderPopup.target = self; llmProviderPopup.action = #selector(llmProviderChanged)
+        y -= 30; body.addSubview(llmProviderPopup)
+
         func mkTF(_ label:String)->NSTextField {
             let lb = NSTextField(frame:NSRect(x:m,y:y-14,width:w-m*2,height:14)); lb.stringValue = label
             lb.isBezeled = false; lb.drawsBackground = false; lb.isEditable = false; lb.font = .systemFont(ofSize:10)
@@ -1319,6 +1379,81 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         saveAI.title = "Save AI Config"; saveAI.bezelStyle = .rounded; saveAI.font = .systemFont(ofSize: 11, weight: .medium)
         saveAI.target = self; saveAI.action = #selector(saveAIConfig); y -= 36; body.addSubview(saveAI)
 
+        // Local LLM
+        sec("Local LLM (Open Source)")
+        // HuggingFace Model Name with link
+        let hfLabelRow = NSView(frame: NSRect(x: m, y: y-14, width: w-m*2, height: 14))
+        let hfLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 14))
+        hfLabel.stringValue = "HuggingFace Model Name"
+        hfLabel.isBezeled = false; hfLabel.drawsBackground = false; hfLabel.isEditable = false
+        hfLabel.font = .systemFont(ofSize: 10); hfLabel.textColor = .secondaryLabelColor
+        hfLabelRow.addSubview(hfLabel)
+        hfLinkBtn = NSButton(frame: NSRect(x: 145, y: -1, width: 200, height: 14))
+        hfLinkBtn.attributedTitle = NSAttributedString(string: "Browse models →", attributes: [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ])
+        hfLinkBtn.isBordered = false; hfLinkBtn.target = self
+        hfLinkBtn.action = #selector(openHuggingFaceSearch)
+        hfLabelRow.addSubview(hfLinkBtn)
+        y -= 18; body.addSubview(hfLabelRow)
+
+        localModelField = NSTextField(frame: NSRect(x: m, y: y-22, width: w-m*2, height: 22))
+        localModelField.stringValue = cfg.localModelName; localModelField.isBezeled = true
+        localModelField.bezelStyle = .squareBezel; localModelField.delegate = self
+        localModelField.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        localModelField.placeholderString = "Qwen/Qwen2.5-7B-Instruct-GGUF"
+        y -= 28; body.addSubview(localModelField)
+
+        // Download location
+        mkSub("Download Location")
+        localDirField = NSTextField(frame: NSRect(x: m, y: y-22, width: w-m*2-70, height: 22))
+        localDirField.stringValue = cfg.localModelDir; localDirField.isBezeled = true
+        localDirField.bezelStyle = .squareBezel; localDirField.delegate = self
+        localDirField.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+        body.addSubview(localDirField)
+        let dirChooseBtn = NSButton(frame: NSRect(x: w-m-62, y: y-26, width: 62, height: 26))
+        dirChooseBtn.title = "Choose..."; dirChooseBtn.bezelStyle = .rounded
+        dirChooseBtn.font = .systemFont(ofSize: 10); dirChooseBtn.target = self; dirChooseBtn.action = #selector(chooseModelDir)
+        y -= 30; body.addSubview(dirChooseBtn)
+
+        // Download + Start/Stop row
+        localDownloadBtn = NSButton(frame: NSRect(x: m, y: y-26, width: 120, height: 26))
+        localDownloadBtn.title = "Download"; localDownloadBtn.bezelStyle = .rounded
+        localDownloadBtn.font = .systemFont(ofSize: 11); localDownloadBtn.target = self; localDownloadBtn.action = #selector(downloadLocalModel)
+        body.addSubview(localDownloadBtn)
+
+        let delBtn = NSButton(frame: NSRect(x: m+126, y: y-26, width: 120, height: 26))
+        delBtn.title = "Delete Model"; delBtn.bezelStyle = .rounded
+        delBtn.font = .systemFont(ofSize: 11); delBtn.target = self; delBtn.action = #selector(deleteLocalModel)
+        body.addSubview(delBtn)
+
+        localStartBtn = NSButton(frame: NSRect(x: m+252, y: y-26, width: 60, height: 26))
+        localStartBtn.title = "Start"; localStartBtn.bezelStyle = .rounded
+        localStartBtn.font = .systemFont(ofSize: 11); localStartBtn.target = self; localStartBtn.action = #selector(startLocalServer)
+        body.addSubview(localStartBtn)
+
+        localStopBtn = NSButton(frame: NSRect(x: m+318, y: y-26, width: 60, height: 26))
+        localStopBtn.title = "Stop"; localStopBtn.bezelStyle = .rounded
+        localStopBtn.font = .systemFont(ofSize: 11); localStopBtn.target = self; localStopBtn.action = #selector(stopLocalServer)
+        localStopBtn.isEnabled = false
+        body.addSubview(localStopBtn)
+
+        y -= 32
+
+        // Status + progress
+        localProgress = NSProgressIndicator(frame: NSRect(x: m, y: y-6, width: w-m*2-80, height: 6))
+        localProgress.style = .bar; localProgress.isIndeterminate = false
+        localProgress.minValue = 0; localProgress.maxValue = 100; localProgress.doubleValue = 0
+        localProgress.isDisplayedWhenStopped = false; y -= 10; body.addSubview(localProgress)
+
+        localStatusLabel = NSTextField(frame: NSRect(x: m, y: y-14, width: w-m*2, height: 14))
+        localStatusLabel.stringValue = "Select \"Local (llama.cpp)\" and download a model to use open-source LLMs."
+        localStatusLabel.isBezeled = false; localStatusLabel.drawsBackground = false; localStatusLabel.isEditable = false
+        localStatusLabel.font = .systemFont(ofSize: 10); localStatusLabel.textColor = .secondaryLabelColor
+        y -= 18; body.addSubview(localStatusLabel)
+
         // Agent
         sec("Agent Integration")
         agentSyncToggle = NSButton(checkboxWithTitle:"Sync WorkBuddy thoughts to Duck",target:self,action:#selector(agentToggled))
@@ -1336,11 +1471,35 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         // About
         sec("About")
         let aboutL = NSTextField(frame:NSRect(x:m,y:y-28,width:w-m*2,height:32))
-        aboutL.stringValue = "Desktop Duck Pet v1.1\nRight-click -> Preferences | Menu bar -> All settings"
+        aboutL.stringValue = "Desktop Duck Pet v1.3\nRight-click -> Preferences | Menu bar -> All settings"
         aboutL.isBezeled = false; aboutL.drawsBackground = false; aboutL.isEditable = false
         aboutL.font = .systemFont(ofSize:10); aboutL.textColor = .secondaryLabelColor; aboutL.lineBreakMode = .byWordWrapping; body.addSubview(aboutL)
+        y -= 8
 
         sv.documentView = body; win.contentView = sv; updateLabels()
+        refreshProviderState()
+    }
+
+    func refreshProviderState() {
+        guard llmKey != nil, llmUrl != nil, localDirField != nil else { return }
+        let isLocal = cfg.llmProvider == "local"; let isCustom = cfg.llmProvider == "custom"
+        llmKey.isEnabled = !isLocal; llmKey.stringValue = isLocal ? "" : cfg.llmApiKey
+        llmModel?.isEnabled = !isLocal
+        llmUrl.isEnabled = !isLocal
+        localModelField?.isEnabled = isLocal
+        localDirField?.isEnabled = isLocal
+        localDownloadBtn?.isEnabled = isLocal
+        localStartBtn?.isEnabled = isLocal
+        localStopBtn?.isEnabled = isLocal
+        let dimColor = NSColor.disabledControlTextColor
+        let activeColor = NSColor.controlTextColor
+        llmKey.textColor = isLocal ? dimColor : activeColor
+        llmModel?.textColor = isLocal ? dimColor : activeColor
+        llmUrl.textColor = isLocal ? dimColor : activeColor
+        localModelField?.textColor = isLocal ? activeColor : dimColor
+        localDirField?.textColor = isLocal ? activeColor : dimColor
+        keyLinkBtn?.isHidden = isLocal || isCustom
+        hfLinkBtn?.isHidden = !isLocal
     }
 
     override func showWindow(_ s: Any?) {
@@ -1364,7 +1523,335 @@ class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         cfg.llmApiKey = llmKey.stringValue
         cfg.llmModel = llmModel.stringValue
         cfg.llmUrl = llmUrl.stringValue
+        cfg.localModelDir = localDirField?.stringValue ?? cfg.localModelDir
+        let p = cfg.llmProvider
+        let msg: String
+        if p == "local" { msg = "Config saved. Model dir: \(cfg.localModelDir)" }
+        else if p == "custom" { msg = "Custom config saved: \(cfg.llmUrl)" }
+        else { msg = "\(p.capitalized) config saved." }
+        localStatusLabel.stringValue = msg
         cfg.save()
+    }
+
+    // ─── Local LLM ────────────────────────────────────────────
+    @objc func llmProviderChanged(_ sender: NSPopUpButton) {
+        let providers = ["minimax","openai","anthropic","deepseek","google","xai","mistral","cohere",
+                         "meta","azure","groq","siliconflow","zhipu","bailian","baidu","moonshot",
+                         "openrouter","local","custom"]
+        cfg.llmProvider = providers[sender.indexOfSelectedItem]
+        let isLocal = cfg.llmProvider == "local"
+        let isCustom = cfg.llmProvider == "custom"
+        let isCloud = !isLocal && !isCustom
+
+        // Auto-set URL and model for known providers (not custom)
+        if !isCustom {
+            let urls: [String: String] = [
+                "minimax":     "https://api.minimax.io/v1/chat/completions",
+                "openai":      "https://api.openai.com/v1/chat/completions",
+                "anthropic":   "https://api.anthropic.com/v1/messages",
+                "deepseek":    "https://api.deepseek.com/v1/chat/completions",
+                "google":      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                "xai":         "https://api.x.ai/v1/chat/completions",
+                "mistral":     "https://api.mistral.ai/v1/chat/completions",
+                "cohere":      "https://api.cohere.ai/v1/chat",
+                "meta":        "https://api.together.xyz/v1/chat/completions",
+                "azure":       "https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/chat/completions?api-version=2024-02-01",
+                "groq":        "https://api.groq.com/openai/v1/chat/completions",
+                "siliconflow": "https://api.siliconflow.cn/v1/chat/completions",
+                "zhipu":       "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "bailian":     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                "baidu":       "https://qianfan.baidubce.com/v2/chat/completions",
+                "moonshot":    "https://api.moonshot.cn/v1/chat/completions",
+                "openrouter":  "https://openrouter.ai/api/v1/chat/completions",
+                "local":       "http://127.0.0.1:\(cfg.localServerPort)/v1/chat/completions"
+            ]
+            let models: [String: String] = [
+                "minimax":     "MiniMax-M2.7",
+                "openai":      "gpt-4o-mini",
+                "anthropic":   "claude-3-5-haiku-latest",
+                "deepseek":    "deepseek-chat",
+                "google":      "gemini-2.5-flash",
+                "xai":         "grok-3-mini",
+                "mistral":     "mistral-small-latest",
+                "cohere":      "command-r-plus",
+                "meta":        "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+                "azure":       "gpt-4o-mini",
+                "groq":        "llama-4-maverick-17b-128e-instruct",
+                "siliconflow": "Qwen/Qwen2.5-7B-Instruct",
+                "zhipu":       "glm-4-flash",
+                "bailian":     "qwen-turbo",
+                "baidu":       "ernie-4.0-turbo-8k",
+                "moonshot":    "moonshot-v1-8k",
+                "openrouter":  "openai/gpt-4o-mini",
+                "local":       cfg.localModelName
+            ]
+            cfg.llmUrl = urls[cfg.llmProvider] ?? cfg.llmUrl
+            cfg.llmModel = models[cfg.llmProvider] ?? cfg.llmModel
+        }
+        llmUrl.stringValue = cfg.llmUrl
+        llmModel.stringValue = cfg.llmModel
+
+        // Disable cloud fields when Local selected
+        llmKey.isEnabled = !isLocal; llmKey.stringValue = isLocal ? "" : cfg.llmApiKey
+        llmModel.isEnabled = !isLocal
+        llmUrl.isEnabled = !isLocal
+
+        // Disable local fields when cloud/custom selected
+        localModelField.isEnabled = isLocal
+        localDirField.isEnabled = isLocal
+        localDownloadBtn.isEnabled = isLocal
+        localStartBtn.isEnabled = isLocal
+        localStopBtn.isEnabled = isLocal
+
+        // Grey out text when disabled
+        let dimColor = NSColor.disabledControlTextColor
+        let activeColor = NSColor.controlTextColor
+        llmKey.textColor = isLocal ? dimColor : activeColor
+        llmModel.textColor = isLocal ? dimColor : activeColor
+        llmUrl.textColor = isLocal ? dimColor : activeColor
+        localModelField.textColor = isLocal ? activeColor : dimColor
+        localDirField.textColor = isLocal ? activeColor : dimColor
+
+        // Update key link visibility
+        keyLinkBtn?.isHidden = isLocal || isCustom
+        let keyTitles: [String: String] = [
+            "minimax":     "MiniMax Keys →",
+            "openai":      "OpenAI Keys →",
+            "anthropic":   "Anthropic Console →",
+            "deepseek":    "DeepSeek Platform →",
+            "google":      "Google AI Studio →",
+            "xai":         "xAI Console →",
+            "mistral":     "Mistral Console →",
+            "cohere":      "Cohere Dashboard →",
+            "meta":        "Together AI Keys →",
+            "azure":       "Azure AI Foundry →",
+            "groq":        "Groq Console →",
+            "siliconflow": "SiliconFlow AK →",
+            "zhipu":       "Zhipu API Keys →",
+            "bailian":     "Bailian Console →",
+            "baidu":       "Qianfan Console →",
+            "moonshot":    "Moonshot Platform →",
+            "openrouter":  "OpenRouter Keys →",
+        ]
+        let title = keyTitles[cfg.llmProvider] ?? "Get API Key →"
+        keyLinkBtn?.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ])
+        hfLinkBtn?.isHidden = !isLocal
+
+        localStatusLabel.stringValue = isLocal
+            ? "Local LLM selected. Download a model and click Start."
+            : isCustom ? "Custom API endpoint. Enter URL and key manually."
+            : "\(cfg.llmProvider.capitalized) selected. Enter API key and Save."
+        cfg.save()
+    }
+
+    @objc func openProviderKeyLink() {
+        let urls: [String: String] = [
+            "minimax":     "https://platform.minimax.io/user-center/basic-information/interface-key",
+            "openai":      "https://platform.openai.com/api-keys",
+            "anthropic":   "https://console.anthropic.com/keys",
+            "deepseek":    "https://platform.deepseek.com/api_keys",
+            "google":      "https://aistudio.google.com/apikey",
+            "xai":         "https://console.x.ai",
+            "mistral":     "https://console.mistral.ai/api-keys",
+            "cohere":      "https://dashboard.cohere.com/api-keys",
+            "meta":        "https://api.together.ai/settings/api-keys",
+            "azure":       "https://ai.azure.com",
+            "groq":        "https://console.groq.com/keys",
+            "siliconflow": "https://cloud.siliconflow.cn/account/ak",
+            "zhipu":       "https://open.bigmodel.cn/usercenter/apikeys",
+            "bailian":     "https://bailian.console.aliyun.com",
+            "baidu":       "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
+            "moonshot":    "https://platform.moonshot.cn/console/api-keys",
+            "openrouter":  "https://openrouter.ai/keys",
+        ]
+        if let url = URL(string: urls[cfg.llmProvider] ?? "https://google.com/search?q=\(cfg.llmProvider)+api+key") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func openHuggingFaceSearch() {
+        NSWorkspace.shared.open(URL(string: "https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=GGUF")!)
+    }
+
+    @objc func downloadLocalModel() {
+        localDownloadBtn.isEnabled = false
+        localProgress.isHidden = false; localProgress.isIndeterminate = false
+        localProgress.doubleValue = 0
+        localStatusLabel.stringValue = "Starting download from HuggingFace..."
+        let name = localModelField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else {
+            localStatusLabel.stringValue = "Please enter a model name (e.g. Qwen/Qwen2.5-7B-Instruct-GGUF)"
+            localDownloadBtn.isEnabled = true; localProgress.stopAnimation(nil)
+            return
+        }
+        cfg.localModelName = name; cfg.localModelDir = localDirField.stringValue; cfg.save()
+
+        let sp = scriptsDir() + "pet-llm-server.py"
+        DispatchQueue.global().async { [weak self] in
+            let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/local/bin/python3")
+            t.arguments = [sp, "--download", name, "--dir", cfg.localModelDir]
+            let outPipe = Pipe(); t.standardOutput = outPipe; t.standardError = Pipe()
+            try? t.run()
+            let fh = outPipe.fileHandleForReading
+            var buffer = Data()
+            var done = false
+            while !done {
+                let chunk = fh.availableData
+                if chunk.isEmpty { done = true; break }
+                buffer.append(chunk)
+                let str = String(data: buffer, encoding: .utf8) ?? ""
+                let lines = str.components(separatedBy: "\n")
+                buffer = Data()
+                for line in lines {
+                    guard !line.isEmpty, let d = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                    let st = obj["status"] as? String ?? ""
+                    DispatchQueue.main.async { [weak self] in
+                        switch st {
+                        case "starting":
+                            self?.localStatusLabel.stringValue = "Connecting to HuggingFace..."
+                        case "scanning":
+                            self?.localStatusLabel.stringValue = "Scanning HuggingFace for GGUF files..."
+                        case "downloading":
+                            let fname = obj["file"] as? String ?? ""
+                            let totalBytes = obj["size_bytes"] as? Int ?? 0
+                            if totalBytes > 0 {
+                                let sizeMB = Double(totalBytes) / 1_048_576
+                                self?.localStatusLabel.stringValue = String(format: "Downloading \(fname) (%.1f MB)... 0%%", sizeMB)
+                            } else {
+                                self?.localStatusLabel.stringValue = "Downloading \(fname)..."
+                            }
+                        case "progress":
+                            let pct = obj["percent"] as? Double ?? 0
+                            let downloaded = obj["downloaded_bytes"] as? Int ?? 0
+                            let total = obj["total_bytes"] as? Int ?? 1
+                            let downMB = Double(downloaded) / 1_048_576
+                            let totalMB = Double(total) / 1_048_576
+                            self?.localProgress.doubleValue = pct
+                            self?.localStatusLabel.stringValue = String(format: "Downloading... %.1f%% (%.1f / %.1f MB)", pct, downMB, totalMB)
+                        case "complete":
+                            let sz = obj["size_mb"] as? Double ?? 0
+                            let str = String(format: "Model downloaded (%.1f MB). Click Start to run.", sz)
+                            self?.localStatusLabel.stringValue = str
+                            self?.localProgress.stopAnimation(nil); self?.localDownloadBtn.isEnabled = true
+                        case "cached":
+                            let sz = obj["size_mb"] as? Double ?? 0
+                            let str = String(format: "Model already cached (%.1f MB). Click Start to run.", sz)
+                            self?.localStatusLabel.stringValue = str
+                            self?.localProgress.stopAnimation(nil); self?.localDownloadBtn.isEnabled = true
+                        case "error":
+                            let msg = obj["message"] as? String ?? "Unknown error"
+                            self?.localStatusLabel.stringValue = "Error: \(msg)"
+                            self?.localProgress.stopAnimation(nil); self?.localDownloadBtn.isEnabled = true
+                        default: break
+                        }
+                    }
+                }
+            }
+            t.waitUntilExit()
+        }
+    }
+
+    @objc func startLocalServer() {
+        localStartBtn.isEnabled = false; localStatusLabel.stringValue = "Starting llama-server..."
+        let sp = scriptsDir() + "pet-llm-server.py"
+        DispatchQueue.global().async { [weak self] in
+            let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/local/bin/python3")
+            t.arguments = [sp, "--start"]
+            let outPipe = Pipe(); t.standardOutput = outPipe; t.standardError = Pipe()
+            try? t.run()
+            let fh = outPipe.fileHandleForReading
+            var buffer = Data()
+            var done = false
+            while !done {
+                let chunk = fh.availableData
+                if chunk.isEmpty { done = true; break }
+                buffer.append(chunk)
+                let str = String(data: buffer, encoding: .utf8) ?? ""
+                let lines = str.components(separatedBy: "\n")
+                buffer = Data()
+                for line in lines {
+                    guard !line.isEmpty, let d = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                    let st = obj["status"] as? String ?? ""
+                    DispatchQueue.main.async { [weak self] in
+                        switch st {
+                        case "starting":
+                            self?.localStatusLabel.stringValue = "Launching llama-server..."
+                        case "warming_up":
+                            let el = obj["elapsed"] as? Int ?? 0
+                            self?.localStatusLabel.stringValue = "Loading model into memory... (\(el)s)"
+                        case "ready":
+                            let mname = obj["model"] as? String ?? ""
+                            self?.localStatusLabel.stringValue = "Server ready — model: \(mname)"
+                            self?.localStartBtn.isEnabled = false; self?.localStopBtn.isEnabled = true
+                        case "error":
+                            let msg = obj["message"] as? String ?? ""
+                            self?.localStatusLabel.stringValue = "Error: \(msg)"
+                            self?.localStartBtn.isEnabled = true
+                        case "crashed":
+                            self?.localStatusLabel.stringValue = "Server crashed on startup. Check model file."
+                            self?.localStartBtn.isEnabled = true
+                        case "timeout":
+                            self?.localStatusLabel.stringValue = "Server warmup timed out (60s). Try again."
+                            self?.localStartBtn.isEnabled = true
+                        default: break
+                        }
+                    }
+                }
+            }
+            t.waitUntilExit()
+        }
+    }
+
+    @objc func stopLocalServer() {
+        localStopBtn.isEnabled = false; localStatusLabel.stringValue = "Stopping server..."
+        let sp = scriptsDir() + "pet-llm-server.py"
+        DispatchQueue.global().async { [weak self] in
+            Process.launchedProcess(launchPath: "/usr/local/bin/python3", arguments: [sp, "--stop"]).waitUntilExit()
+            DispatchQueue.main.async {
+                self?.localStatusLabel.stringValue = "Server stopped."
+                self?.localStartBtn.isEnabled = true; self?.localStopBtn.isEnabled = false
+            }
+        }
+    }
+
+    @objc func openGroupChatBtn() { AppDelegate.instance?.showGroupChat() }
+
+    @objc func chooseModelDir() {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false; panel.prompt = "Select Download Directory"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        cfg.localModelDir = url.path + "/"
+        localDirField.stringValue = cfg.localModelDir
+        cfg.save()
+    }
+
+    @objc func deleteLocalModel() {
+        let fm = FileManager.default; let dir = cfg.localModelDir
+        guard fm.fileExists(atPath: dir) else {
+            localStatusLabel.stringValue = "No models found in \(dir)"
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Delete All Local Models?"
+        alert.informativeText = "This will delete all .gguf files in \(dir).\nThis cannot be undone."
+        alert.addButton(withTitle: "Delete"); alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let files = try fm.contentsOfDirectory(atPath: dir)
+            for f in files where f.hasSuffix(".gguf") || f.hasSuffix(".bin") {
+                try fm.removeItem(atPath: dir + f)
+            }
+            localStatusLabel.stringValue = "Models deleted from \(dir)"
+        } catch {
+            localStatusLabel.stringValue = "Error deleting models: \(error.localizedDescription)"
+        }
     }
 
     @objc func switchToDuck() {
@@ -1969,6 +2456,7 @@ class DuckView: NSView, NSTextViewDelegate {
         menu.addItem(.separator())
         let jrnl = NSMenuItem(title:"Journal Entry...",action:#selector(startJournalMode),keyEquivalent:"j"); jrnl.target = self; menu.addItem(jrnl)
         let jview = NSMenuItem(title:"View Journal",action:#selector(openJournal),keyEquivalent:""); jview.target = self; menu.addItem(jview)
+        let group = NSMenuItem(title:"Group Chat...",action:#selector(openGroupChat),keyEquivalent:"g"); group.target = self; menu.addItem(group)
         menu.addItem(.separator())
         let top = NSMenuItem(title:"Always on Top",action:#selector(setLevelTop),keyEquivalent:""); top.target = self; top.state = cfg.windowLevel == 2 ? .on:.off; menu.addItem(top)
         let norm = NSMenuItem(title:"Normal Window",action:#selector(setLevelNormal),keyEquivalent:""); norm.target = self; norm.state = cfg.windowLevel == 1 ? .on:.off; menu.addItem(norm)
@@ -1980,6 +2468,7 @@ class DuckView: NSView, NSTextViewDelegate {
     @objc func openSettings() { AppDelegate.instance?.showSettings() }
     @objc func startJournalMode() { startJournalSession() }
     @objc func openJournal() { AppDelegate.instance?.showJournal() }
+    @objc func openGroupChat() { AppDelegate.instance?.showGroupChat() }
     @objc func setLevelTop() { setWindowLevel(2) }
     @objc func setLevelNormal() { setWindowLevel(1) }
     @objc func setLevelBottom() { setWindowLevel(0) }
@@ -2256,13 +2745,14 @@ class AppDelegate:NSObject,NSApplicationDelegate {
         return (sf.width-sz-40,sf.height-sz-200,sz,sz) }
     func startWatcher() {
         let d = (THOUGHTS_FILE as NSString).deletingLastPathComponent; try?FileManager.default.createDirectory(atPath:d,withIntermediateDirectories:true)
-        if !FileManager.default.fileExists(atPath:THOUGHTS_FILE){try?"[]".write(toFile:THOUGHTS_FILE,atomically:true,encoding:.utf8)}
+        // Clear old thoughts on startup to prevent stale bubbles
+        try?"[]".write(toFile:THOUGHTS_FILE,atomically:true,encoding:.utf8)
         DispatchQueue.main.async{[weak self]in self?.c(isInit:true)}
         Timer.scheduledTimer(withTimeInterval:POLL_INTERVAL,repeats:true){[weak self]_ in self?.c(isInit:false)}}
     func c(isInit:Bool) { guard cfg.agentSync else{return}
         guard let ct = try?String(contentsOfFile:THOUGHTS_FILE,encoding:.utf8),let dt = ct.data(using:.utf8),
               let t = try?JSONSerialization.jsonObject(with:dt) as? [[String:Any]] else{return}
-        let nc = t.count; if isInit{cnt = nc; for e in t{p(e)}; return}
+        let nc = t.count; if isInit{cnt = nc; return}  // Don't replay old thoughts on startup
         if nc>cnt{for i in cnt..<nc{p(t[i])}; cnt = nc} }
     func p(_ t:[String:Any]?) { guard let t = t else{return}
         let tp = t["type"] as? String ?? "", tx = t["text"] as? String ?? ""

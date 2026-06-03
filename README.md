@@ -1,6 +1,6 @@
 # Desktop Duck 🦆
 
-A desktop pet app for macOS — a floating window with an AI-powered duck (or capybara!) that chats, journals, animates, and now: runs group discussions with a buddy.
+A desktop pet app for macOS — a floating window with an AI-powered duck (or capybara!) that chats, journals, animates, and now: runs group discussions with a buddy. **v1.3 brings local LLM support — run models entirely offline.**
 
 ![Desktop Pet](screenshots/pet.png)
 
@@ -29,12 +29,26 @@ mkdir -p 小鸭子.app/Contents/Resources
 cp duck-pet 小鸭子.app/Contents/MacOS/
 cp pet-*.py 小鸭子.app/Contents/Resources/
 cp duck-idle.gif capybara.gif 小鸭子.app/Contents/Resources/
+cp llama-server lib*.dylib 小鸭子.app/Contents/Resources/
 
 # Open it
 open 小鸭子.app
 ```
 
-## 🆕 v1.2 — Group Chat
+## 🆕 v1.3 — Local LLM & Offline AI
+
+![Local LLM](screenshots/local_model.png)
+
+Run your desktop pet entirely offline with a local language model:
+
+- **Local LLM Support**: Download and run Qwen 2.5-7B (or any GGUF model) via bundled llama-server — no cloud API needed
+- **Zero-Dependency Download**: Model downloads use pure Python stdlib (or pure `curl`/shell fallback) — no `pip install` required
+- **One-Click Setup**: Enter a HuggingFace model name, click Download, wait for the 3.5GB model, then Start — your pet runs locally on Apple Silicon
+- **Code-Enforced Group Chat Routing**: Group chat now uses deterministic routing (code decides who speaks to whom) — the LLM only generates content, ensuring identical conversation flow across cloud and local models
+- **Smart Model Selection**: Automatically picks the best single-file GGUF (prioritizing q4_k_m > q3_k_m > q2_k), handles split-file models transparently
+- **Health Monitoring**: Real-time server status display, warmup progress, and crash recovery
+
+### v1.2 — Group Chat
 
 ![Group Chat](group_chat.jpg)
 
@@ -51,14 +65,18 @@ Two pets, one stage. From the menu bar, open **Group Chat**, configure both pets
 ## Features
 
 - **Desktop Pet**: Floating animated character (duck or capybara) with idle/walk animations
-- **AI Chat**: Powered by MiniMax API — click the duck to chat, right-click for preferences
-- **Group Chat** 🆕: Dual-pet autonomous discussions with multi-turn pet-to-pet dialogue (v1.2)
+- **AI Chat**: Powered by MiniMax API or local LLM — click the duck to chat, right-click for preferences
+- **Group Chat** (v1.2): Dual-pet autonomous discussions with multi-turn pet-to-pet dialogue
+- **Local LLM** 🆕 (v1.3): Download and run Qwen 2.5-7B offline — zero cloud API needed
 - **Journal**: Iterative document-based journal with AI summarization
 - **Character Generator**: AI-powered spritesheet → GIF animation pipeline — describe any character and get a custom animated pet in 6 frames
 - **Spritesheet Editor**: Upload/Generate → Grid adjustment → Convert → Apply
 - **Preferences**: Full customization of appearance, bubbles, memory, and more
 
 ## Screenshots
+
+### Local LLM (v1.3)
+![Local LLM](screenshots/local_model.png)
 
 ### Group Chat (v1.2)
 ![Group Chat](group_chat.jpg)
@@ -83,6 +101,7 @@ Describe any character — pixel cat, robot, slime — and the AI generates a fu
 
 Copy `duck-config.json.template` to `~/.workbuddy/duck-config.json` and fill in:
 
+**Cloud AI** (requires API key):
 ```json
 {
   "llmApiKey": "your-minimax-api-key",
@@ -91,7 +110,17 @@ Copy `duck-config.json.template` to `~/.workbuddy/duck-config.json` and fill in:
 }
 ```
 
-For group chat, the config also supports:
+**Local LLM** (no API key needed):
+```json
+{
+  "llmProvider": "local",
+  "localModelName": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+  "localServerPort": 8090,
+  "localModelDir": "/Users/yourname/.workbuddy/models/"
+}
+```
+
+For group chat:
 ```json
 {
   "groupChatEnabled": true,
@@ -106,14 +135,17 @@ For group chat, the config also supports:
 
 - macOS 12+
 - Swift 5.9+
-- Python 3 with Pillow (`pip install Pillow`)
-- MiniMax API key for AI features
+- Python 3 (built-in on macOS 13+) — required for local LLM download/server management
+- MiniMax API key for cloud AI features (optional if using local LLM)
+- ~3.5GB free disk space for the default local model (Qwen 2.5-7B GGUF)
 
 ## Project Structure
 
-- `duck-pet.swift` — Main Swift application
-- `pet-group-chat.py` — 🆕 Group chat AI orchestration engine (v1.2)
-- `pet-auto-reply.py` — AI chat response engine
+- `duck-pet.swift` — Main Swift application with local LLM UI
+- `pet-llm-server.py` — 🆕 Local LLM download & server manager (zero dependencies, v1.3)
+- `llama-server` — 🆕 Bundled llama.cpp inference engine
+- `pet-group-chat.py` — 🆕 Group chat AI orchestration engine (code-enforced routing, v1.2/1.3)
+- `pet-auto-reply.py` — AI chat response engine (supports cloud + local LLM)
 - `pet-think.py` — Thought injection bridge
 - `pet-generate-character.py` — AI spritesheet generation
 - `pet-convert-spritesheet.py` — Spritesheet → GIF conversion
@@ -121,7 +153,8 @@ For group chat, the config also supports:
 - `pet-random-content.py` — Random content/events
 - `duck-idle.gif` — Default duck animation
 - `capybara.gif` — Capybara alternative pet
-- `group_chat.jpg` — 🆕 Group chat screenshot (v1.2)
+- `group_chat.jpg` — Group chat screenshot (v1.2)
+- `screenshots/local_model.png` — 🆕 Local LLM screenshot (v1.3)
 
 ## Platform
 
