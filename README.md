@@ -2,14 +2,32 @@
 
 A desktop pet app for macOS — a floating window with an AI-powered duck (or capybara!) that chats, journals, and animates.
 
+![Desktop Pet](screenshots/pet.png)
+
 ## Features
 
 - **Desktop Pet**: Floating animated character (duck or capybara) with idle/walk animations
-- **AI Chat**: Powered by MiniMax API — click the duck to chat
+- **AI Chat**: Powered by MiniMax API — click the duck to chat, right-click for preferences
 - **Journal**: Iterative document-based journal with AI summarization
-- **Character Generator**: AI-generated spritesheet → GIF animation pipeline
+- **Character Generator**: AI-powered spritesheet → GIF animation pipeline — describe any character and get a custom animated pet in 5 frames
 - **Spritesheet Editor**: Upload/Generate → Grid adjustment → Convert → Apply
 - **Preferences**: Full customization of appearance, bubbles, memory, and more
+
+## Screenshots
+
+### Chat with AI
+![Chat](screenshots/talk.png)
+
+### Preferences
+![Preferences](screenshots/preferences.png)
+
+### AI Character Generator
+Describe any character — pixel cat, robot, slime — and the AI generates a full spritesheet with 5 sequential animation poses, automatically sliced into per-frame GIFs with transparent backgrounds. Fine-tune frame boundaries by dragging grid lines directly on the preview, then convert and apply to your pet with one click.
+
+![Character Generator](screenshots/generate.png)
+
+### Journal
+![Journal](screenshots/journal.png)
 
 ## Quick Start
 
