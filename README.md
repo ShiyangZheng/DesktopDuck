@@ -56,7 +56,11 @@ brew tap shiyangzheng/tap
 brew install --cask desktop-duck
 ```
 
-### Manual Install
+### Download from GitHub Releases
+
+Download the latest `DesktopDuck-v*.app.zip` from [Releases](https://github.com/ShiyangZheng/DesktopDuck/releases), unzip, and drag `DesktopDuck.app` to `/Applications`.
+
+### Manual Install from Source
 
 ```bash
 # Compile the Swift app
