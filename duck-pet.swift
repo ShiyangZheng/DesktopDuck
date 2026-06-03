@@ -122,6 +122,11 @@ class Config: NSObject {
     var journalPrompt: String = JOURNAL_TEMPLATES[0].1
     var windowX: CGFloat?; var windowY: CGFloat?; var windowW: CGFloat?; var windowH: CGFloat?
     var petType: String = "duck"
+    var groupChatEnabled: Bool = false
+    var groupPets: [[String: String]] = [
+        ["name": "Duck", "personality": "cheerful and energetic", "thinking": "optimistic"],
+        ["name": "Capybara", "personality": "calm and wise", "thinking": "analytical"]
+    ]
     var bubbleTextWidth: CGFloat { bubbleWidth - 52 }
 
     override init() { super.init(); load() }
@@ -155,6 +160,8 @@ class Config: NSObject {
         if let v = j["y"] as? Double { windowY = CGFloat(v) }
         if let v = j["w"] as? Double { windowW = CGFloat(v) }
         if let v = j["h"] as? Double { windowH = CGFloat(v) }
+        if let v = j["groupChatEnabled"] as? Bool { groupChatEnabled = v }
+        if let v = j["groupPets"] as? [[String: String]] { groupPets = v }
     }
 
     func save() {
@@ -167,6 +174,9 @@ class Config: NSObject {
             "compressThreshold": compressThreshold,             "agentSync": agentSync,
             "journalTemplate": journalTemplate, "journalPrompt": journalPrompt,
             "user_name": userName, "ai_name": aiName,
+            "petType": petType,
+            "groupChatEnabled": groupChatEnabled,
+            "groupPets": groupPets,
         ]
         if !llmApiKey.isEmpty { j["minimax_api_key"] = llmApiKey }
         if !idleGifPath.isEmpty { j["idleGifPath"] = idleGifPath }
@@ -223,21 +233,45 @@ func makeBubbleWin(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat) -> NSWindow {
 // ─── BubbleView ────────────────────────────────────────────
 class BubbleView: NSView {
     var text: String = ""; var btype: String = "thinking"; var alpha: CGFloat = 1
+    var isHovered = false { didSet { needsDisplay = true } }
+    var isUser: Bool { btype == "user" }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let colors: [String:(CGFloat,CGFloat,CGFloat)] = [
-            "thinking":(1,0.97,0.88),"done":(0.91,0.96,0.91),"found":(0.91,0.96,0.91),
-            "searching":(0.89,0.95,0.99),"writing":(0.93,0.91,0.97),"working":(0.89,0.95,0.99),
-            "analyzing":(1,0.97,0.88)]
-        let bg = colors[btype] ?? (1,1,0.96)
-        ctx.setFillColor(red: bg.0, green: bg.1, blue: bg.2, alpha: 0.88*alpha)
+            "thinking":(1, 0.88, 0.72),    // Duck: soft cream
+            "searching":(0.75, 0.88, 0.98), // Capybara: soft ice blue
+            "found":(0.88, 0.94, 0.84),     // Shared: soft mint
+            "done":(0.88, 0.94, 0.84),
+            "writing":(0.91, 0.85, 0.97),   // Shared: soft lavender
+            "working":(0.75, 0.88, 0.98),
+            "analyzing":(0.91, 0.85, 0.97),
+            "user":(1, 1, 1)                 // User: pure white
+        ]
+        let (r, g, b) = colors[btype] ?? (1, 1, 0.96)
+        let bgAlpha: CGFloat = isUser ? 0.92 : 0.78
+        ctx.setFillColor(red: r, green: g, blue: b, alpha: bgAlpha * alpha)
         ctx.addPath(CGPath(roundedRect: bounds, cornerWidth: 10, cornerHeight: 10, transform: nil)); ctx.fillPath()
+        // Hover glow
+        if isHovered {
+            ctx.setStrokeColor(red: r * 0.65, green: g * 0.65, blue: b * 0.65, alpha: 0.45 * alpha)
+            ctx.setLineWidth(2)
+            ctx.addPath(CGPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), cornerWidth: 9, cornerHeight: 9, transform: nil))
+            ctx.strokePath()
+        }
         let font = NSFont(name: "PingFang SC", size: 13) ?? NSFont.systemFont(ofSize: 13)
-        let r = NSRect(x: 12, y: 6, width: BUBBLE_TEXT_WIDTH, height: bounds.height-12)
-        (text as NSString).draw(with: r, options: [.usesLineFragmentOrigin, .usesFontLeading],
+        let r1 = NSRect(x: 12, y: 6, width: BUBBLE_TEXT_WIDTH, height: bounds.height-12)
+        (text as NSString).draw(with: r1, options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font, .foregroundColor: NSColor(red:0.2,green:0.2,blue:0.2,alpha:alpha)])
     }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp], owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with e: NSEvent) { isHovered = true }
+    override func mouseExited(with e: NSEvent) { isHovered = false }
 }
 
 // ─── ButtonOverlay ─────────────────────────────────────────
@@ -951,6 +985,173 @@ class SpritesheetEditorWindow: NSWindowController {
 }
 
 
+// ─── Group Chat Window ────────────────────────────────────
+class GroupChatWindow: NSWindowController {
+    var groupEnabled: NSButton!
+    var pet1Name: NSTextField!, pet1Personality: NSTextField!, pet1Thinking: NSTextField!
+    var pet2Name: NSTextField!, pet2Personality: NSTextField!, pet2Thinking: NSTextField!
+    var startBtn: NSButton!, stopBtn: NSButton!
+    var topicField: NSTextField!
+    var convLog: NSTextView!
+    var statusLabel: NSTextField!
+    var groupActive = false
+
+    convenience init() {
+        let w:CGFloat = 500, h:CGFloat = 660
+        let win = NSWindow(contentRect:NSRect(x:0,y:0,width:w,height:h),
+            styleMask:[.titled,.closable,.miniaturizable,.resizable], backing:.buffered, defer:false)
+        win.title = "Group Chat"; win.isReleasedWhenClosed = false; win.center()
+        self.init(window:win); buildUI(NSSize(width:w,height:h))
+    }
+
+    func buildUI(_ sz: NSSize) {
+        guard let win = window else { return }
+        let w = sz.width, m: CGFloat = 16
+        let sv = NSScrollView(frame: NSRect(x:0,y:0,width:w,height:sz.height))
+        sv.drawsBackground = false; sv.hasVerticalScroller = true; sv.borderType = .noBorder; sv.autohidesScrollers = true
+        let body = NSView(frame: NSRect(x:0,y:0,width:w,height:920)); var y: CGFloat = 900
+
+        func sec(_ t:String) {
+            let lb = NSTextField(frame: NSRect(x: m, y: y-16, width: w-m*2, height: 16))
+            lb.stringValue = t; lb.isBezeled = false; lb.drawsBackground = false; lb.isEditable = false
+            lb.font = .boldSystemFont(ofSize: 11); lb.textColor = .labelColor; y -= 22; body.addSubview(lb)
+        }
+        func sub(_ t:String) {
+            let lb = NSTextField(frame: NSRect(x: m, y: y-12, width: w-m*2, height: 12))
+            lb.stringValue = t; lb.isBezeled = false; lb.drawsBackground = false; lb.isEditable = false
+            lb.font = .systemFont(ofSize: 9); lb.textColor = .secondaryLabelColor; y -= 16; body.addSubview(lb)
+        }
+        func mkField(_ label:String, _ value: String, _ tag: Int) -> NSTextField {
+            let lb = NSTextField(frame: NSRect(x: m, y: y-12, width: w-m*2, height: 12))
+            lb.stringValue = label; lb.isBezeled = false; lb.drawsBackground = false; lb.isEditable = false
+            lb.font = .systemFont(ofSize: 9); lb.textColor = .secondaryLabelColor; y -= 16; body.addSubview(lb)
+            let tf = NSTextField(frame: NSRect(x: m, y: y-24, width: w-m*2, height: 24))
+            tf.stringValue = value; tf.isBezeled = true; tf.bezelStyle = .squareBezel
+            tf.font = .systemFont(ofSize: 11); tf.tag = tag; y -= 30; body.addSubview(tf); return tf
+        }
+
+        sec("Group Chat Mode")
+        groupEnabled = NSButton(checkboxWithTitle: "Enable two-pet group chat", target: self, action: #selector(toggleGroup))
+        groupEnabled.frame = NSRect(x: m-2, y: y-22, width: 300, height: 22)
+        groupEnabled.state = cfg.groupChatEnabled ? .on : .off; y -= 28; body.addSubview(groupEnabled)
+
+        sec("Pet 1 (Duck)")
+        pet1Name = mkField("Name", cfg.groupPets[0]["name"] ?? "Duck", 1)
+        pet1Personality = mkField("Personality", cfg.groupPets[0]["personality"] ?? "cheerful", 2)
+        pet1Thinking = mkField("Thinking Style", cfg.groupPets[0]["thinking"] ?? "optimistic", 3)
+
+        sec("Pet 2 (Capybara)")
+        pet2Name = mkField("Name", cfg.groupPets.count > 1 ? (cfg.groupPets[1]["name"] ?? "Capybara") : "Capybara", 4)
+        pet2Personality = mkField("Personality", cfg.groupPets.count > 1 ? (cfg.groupPets[1]["personality"] ?? "calm") : "calm", 5)
+        pet2Thinking = mkField("Thinking Style", cfg.groupPets.count > 1 ? (cfg.groupPets[1]["thinking"] ?? "analytical") : "analytical", 6)
+
+        let saveBtn = NSButton(frame: NSRect(x: m, y: y-26, width: w-m*2, height: 26))
+        saveBtn.title = "Save Pet Config"; saveBtn.bezelStyle = .rounded; saveBtn.font = .systemFont(ofSize: 11)
+        saveBtn.target = self; saveBtn.action = #selector(saveConfig); y -= 34; body.addSubview(saveBtn)
+
+        sec("Session")
+        topicField = NSTextField(frame: NSRect(x: m, y: y-28, width: w-m*2-170, height: 28))
+        topicField.placeholderString = "What shall we discuss?"
+        topicField.isBezeled = true; topicField.bezelStyle = .squareBezel; topicField.font = .systemFont(ofSize: 12)
+        body.addSubview(topicField)
+        startBtn = NSButton(frame: NSRect(x: w-m-160, y: y-26, width: 75, height: 26))
+        startBtn.title = "Start"; startBtn.bezelStyle = .rounded; startBtn.font = .systemFont(ofSize: 11, weight: .medium)
+        startBtn.target = self; startBtn.action = #selector(startSession); body.addSubview(startBtn)
+        stopBtn = NSButton(frame: NSRect(x: w-m-80, y: y-26, width: 75, height: 26))
+        stopBtn.title = "Stop"; stopBtn.bezelStyle = .rounded; stopBtn.font = .systemFont(ofSize: 11)
+        stopBtn.target = self; stopBtn.action = #selector(stopSession); stopBtn.isEnabled = false; body.addSubview(stopBtn)
+        y -= 38
+
+        sec("Conversation")
+        let logScroll = NSScrollView(frame: NSRect(x: m, y: y-200, width: w-m*2, height: 200))
+        logScroll.drawsBackground = false; logScroll.hasVerticalScroller = true
+        logScroll.borderType = .bezelBorder; logScroll.autohidesScrollers = true
+        convLog = NSTextView(frame: NSRect(x: 0, y: 0, width: w-m*2-16, height: 200))
+        convLog.isEditable = false; convLog.isRichText = true
+        convLog.font = NSFont(name: "PingFang SC", size: 12) ?? NSFont.systemFont(ofSize: 12)
+        convLog.textColor = .labelColor; convLog.backgroundColor = .clear
+        let initial = NSMutableAttributedString(string: "Group chat transcript will appear here.\n", attributes: [
+            .font: NSFont(name: "PingFang SC", size: 12) ?? NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ])
+        initial.append(NSAttributedString(string: "Configure pets above and click Start.", attributes: [
+            .font: NSFont(name: "PingFang SC", size: 12) ?? NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]))
+        convLog.textStorage?.setAttributedString(initial)
+        logScroll.documentView = convLog; y -= 210; body.addSubview(logScroll)
+
+        statusLabel = NSTextField(frame: NSRect(x: m, y: y-16, width: w-m*2, height: 16))
+        statusLabel.isBezeled = false; statusLabel.drawsBackground = false; statusLabel.isEditable = false
+        statusLabel.font = .systemFont(ofSize: 10); statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "Inactive — enable group chat to start"
+        y -= 16; body.addSubview(statusLabel)
+
+        sv.documentView = body; win.contentView?.addSubview(sv)
+    }
+
+    @objc func toggleGroup() { cfg.groupChatEnabled = (groupEnabled.state == .on); cfg.save() }
+
+    @objc func saveConfig() {
+        cfg.groupPets = [
+            ["name": pet1Name.stringValue, "personality": pet1Personality.stringValue, "thinking": pet1Thinking.stringValue],
+            ["name": pet2Name.stringValue, "personality": pet2Personality.stringValue, "thinking": pet2Thinking.stringValue]
+        ]
+        cfg.save(); statusLabel.stringValue = "Pet config saved."
+    }
+
+    @objc func startSession() {
+        guard cfg.groupChatEnabled else { statusLabel.stringValue = "Enable group chat first."; return }
+        let topic = topicField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty else { statusLabel.stringValue = "Enter a discussion topic."; return }
+        groupActive = true; startBtn.isEnabled = false; stopBtn.isEnabled = true
+        statusLabel.stringValue = "Group chat active — talk to the pets!"
+        let font = NSFont(name: "PingFang SC", size: 12) ?? NSFont.systemFont(ofSize: 12)
+        let boldFont = NSFont(name: "PingFang SC Semibold", size: 12) ?? NSFont.boldSystemFont(ofSize: 12)
+        let topicAttr = NSMutableAttributedString(string: "\u{1f3af} Topic: ", attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
+        topicAttr.append(NSAttributedString(string: topic, attributes: [.font: boldFont, .foregroundColor: NSColor.labelColor]))
+        let ps1 = NSMutableParagraphStyle(); ps1.paragraphSpacing = 8
+        topicAttr.addAttribute(.paragraphStyle, value: ps1, range: NSRange(location: 0, length: topicAttr.length))
+        convLog.textStorage?.setAttributedString(topicAttr)
+        AppDelegate.instance?.startGroupChat(topic: topic)
+    }
+
+    @objc func stopSession() {
+        groupActive = false; startBtn.isEnabled = true; stopBtn.isEnabled = false
+        statusLabel.stringValue = "Session ended."
+        AppDelegate.instance?.stopGroupChat()
+    }
+
+    func appendToLog(_ from: String, _ to: String, _ content: String) {
+        guard let ts = convLog?.textStorage else { return }
+        let font = NSFont(name: "PingFang SC", size: 12) ?? NSFont.systemFont(ofSize: 12)
+        let boldFont = NSFont(name: "PingFang SC Semibold", size: 12) ?? NSFont.boldSystemFont(ofSize: 12)
+        let labelColor = NSColor.labelColor
+        let dimColor = NSColor.secondaryLabelColor
+
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: from, attributes: [.font: boldFont, .foregroundColor: labelColor]))
+        if !to.isEmpty {
+            attr.append(NSAttributedString(string: " \u{2192} ", attributes: [.font: font, .foregroundColor: dimColor]))
+            attr.append(NSAttributedString(string: to, attributes: [.font: boldFont, .foregroundColor: labelColor]))
+        }
+        attr.append(NSAttributedString(string: ": \(content)", attributes: [.font: font, .foregroundColor: labelColor]))
+
+        let ps1 = NSMutableParagraphStyle(); ps1.paragraphSpacing = 6
+        attr.addAttribute(.paragraphStyle, value: ps1, range: NSRange(location: 0, length: attr.length))
+
+        if ts.length > 0 { ts.append(NSAttributedString(string: "\n")) }
+        ts.append(attr)
+
+        if let sv = convLog?.enclosingScrollView, let doc = sv.documentView {
+            sv.contentView.scroll(NSPoint(x: 0, y: max(0, doc.frame.height - sv.contentView.bounds.height)))
+        }
+    }
+
+    override func showWindow(_ s: Any?) { window?.center(); super.showWindow(s) }
+}
+
+
 class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var scaleSlider:NSSlider!, scaleLabel:NSTextField!
     var bubbleWidthSlider:NSSlider!, bwLabel:NSTextField!
@@ -1643,8 +1844,8 @@ class DuckView: NSView, NSTextViewDelegate {
         inputWin!.isOpaque = false; inputWin!.backgroundColor = .clear; inputWin!.level = .floating; inputWin!.hasShadow = true; inputWin!.isReleasedWhenClosed = false
         // Light translucent background with subtle border
         let bg = NSView(frame:NSRect(x:0,y:0,width:iw,height:ih)); bg.wantsLayer = true; bg.layer?.cornerRadius = 16
-        bg.layer?.backgroundColor = NSColor(white:0.97,alpha:0.92).cgColor
-        bg.layer?.borderWidth = 0.5; bg.layer?.borderColor = NSColor(white:0.7,alpha:0.5).cgColor
+        bg.layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.95).cgColor
+        bg.layer?.borderWidth = 1.0; bg.layer?.borderColor = NSColor(white: 0.55, alpha: 0.35).cgColor
         inputWin!.contentView = bg; replyContext = context
         let tv = ChatTextView(frame:NSRect(x:10,y:4,width:iw-42,height:24))
         tv.font = NSFont(name:"PingFang SC",size:13) ?? .systemFont(ofSize:13); tv.isRichText = false; tv.drawsBackground = false
@@ -1700,6 +1901,14 @@ class DuckView: NSView, NSTextViewDelegate {
         if let j = try?JSONSerialization.data(withJSONObject:Array(thoughts.suffix(50))),
            let s = String(data:j,encoding:.utf8){try?s.write(toFile:THOUGHTS_FILE,atomically:true,encoding:.utf8)}
         dismissInput()
+        // Group chat routing: if active and this is a group reply, divert to group processing
+        if let ad = AppDelegate.instance, ad.groupActive, replyContext == "group" {
+            replyContext = nil
+            ad.groupChatWC?.appendToLog("user", "", text)
+            ad.groupTranscript.append(["from": "user", "to": "", "content": text])
+            ad.processGroupTurn(userMessage: text)
+            return
+        }
         let sp = scriptsDir()+"/pet-auto-reply.py"
         DispatchQueue.global().async{let t = Process();t.executableURL = URL(fileURLWithPath:"/usr/local/bin/python3");t.arguments = [sp];try?t.run()}
     }
@@ -1819,7 +2028,11 @@ class InputWindow:NSWindow { override var canBecomeKey:Bool{true} }
 // ─── App Delegate ─────────────────────────────────────────
 class AppDelegate:NSObject,NSApplicationDelegate {
     static weak var instance:AppDelegate?
-    var win:DuckWindow!; var duck:DuckView!; var cnt = 0; var settingsWC:SettingsWindowController?; var journalWC:JournalWindow?; var spritesheetWC:SpritesheetEditorWindow?
+    var win:DuckWindow!; var duck:DuckView!; var cnt = 0; var settingsWC:SettingsWindowController?; var journalWC:JournalWindow?; var spritesheetWC:SpritesheetEditorWindow?; var groupChatWC:GroupChatWindow?
+    var win2:DuckWindow?; var duck2:DuckView?
+    var groupActive = false
+    var groupTranscript: [[String:String]] = []
+    var groupRoundCount = 0
     var statusItem:NSStatusItem?
 
     func applicationShouldTerminateAfterLastWindowClosed(_:NSApplication)->Bool{false}
@@ -1837,6 +2050,7 @@ class AppDelegate:NSObject,NSApplicationDelegate {
         let pref = NSMenuItem(title:"Preferences...",action:#selector(showSettings),keyEquivalent:","); pref.target = self; menu.addItem(pref)
         let jrnl = NSMenuItem(title:"Journal Entry...",action:#selector(startJournal),keyEquivalent:"j"); jrnl.target = self; menu.addItem(jrnl)
         let jview = NSMenuItem(title:"View Journal",action:#selector(showJournal),keyEquivalent:""); jview.target = self; menu.addItem(jview)
+        let group = NSMenuItem(title:"Group Chat...",action:#selector(showGroupChat),keyEquivalent:"g"); group.target = self; menu.addItem(group)
         menu.addItem(.separator())
         let tog = NSMenuItem(title:cfg.alwaysOnTop ? "Move to Normal Layer":"Keep on Top",action:#selector(toggleTop),keyEquivalent:"t"); tog.target = self; menu.addItem(tog)
         let clr = NSMenuItem(title:"Clear Chat History",action:#selector(clearHist),keyEquivalent:""); clr.target = self; menu.addItem(clr)
@@ -1850,6 +2064,175 @@ class AppDelegate:NSObject,NSApplicationDelegate {
     }
     @objc func startJournal() { duck.startJournalSession() }
     @objc func showJournal() { if journalWC == nil{journalWC = JournalWindow()}; journalWC?.showWindow(nil) }
+    @objc func showGroupChat() { if groupChatWC == nil{groupChatWC = GroupChatWindow()}; groupChatWC?.showWindow(nil) }
+    func startGroupChat(topic: String) {
+        groupActive = true; groupTranscript = []; groupRoundCount = 0
+        groupTranscript.append(["from": "system", "to": "", "content": "Topic: \(topic)"])
+        duck?.bubbles.forEach { $0.win.orderOut(nil); $0.timer?.invalidate() }
+        duck?.bubbles.removeAll()
+
+        guard let s = NSScreen.main else { return }
+        let sf = s.visibleFrame; let sz: CGFloat = 96
+        win?.orderOut(nil); duck = nil
+
+        let centerX = sf.midX
+        let baseY = sf.maxY - sz * 3
+        let x1 = centerX - sz - 2; let x2 = centerX + 2
+
+        win = DuckWindow(contentRect: NSRect(x: x1, y: baseY, width: sz, height: sz), styleMask: [], backing: .buffered, defer: false)
+        duck = DuckView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        duck?.bubbles = []
+        let duckIV = NSImageView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        duckIV.imageScaling = .scaleProportionallyUpOrDown; duckIV.animates = true
+        duckIV.image = NSImage(contentsOfFile: scriptsDir() + "duck-idle.gif")
+        duck?.img = duckIV; duck?.subviews.forEach { $0.removeFromSuperview() }; duck?.addSubview(duckIV)
+        win?.contentView = duck; win?.level = .floating; win?.orderFrontRegardless()
+
+        win2 = DuckWindow(contentRect: NSRect(x: x2, y: baseY, width: sz, height: sz), styleMask: [], backing: .buffered, defer: false)
+        duck2 = DuckView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        duck2?.bubbles = []
+        let capyIV = NSImageView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        capyIV.imageScaling = .scaleProportionallyUpOrDown; capyIV.animates = true
+        capyIV.image = NSImage(contentsOfFile: scriptsDir() + "capybara.gif")
+        duck2?.img = capyIV; duck2?.subviews.forEach { $0.removeFromSuperview() }; duck2?.addSubview(capyIV)
+        win2?.contentView = duck2; win2?.level = .floating; win2?.orderFrontRegardless()
+
+        duck?.pushBubble(text: "\u{1f4ac} \(topic)\nLet's discuss!", type: "found")
+        groupChatWC?.appendToLog("System", "", "Topic: \(topic)")
+        processGroupTurn(userMessage: topic)
+    }
+
+    func stopGroupChat() {
+        groupActive = false
+        func cleanupDuck(_ dv: DuckView?) {
+            guard let d = dv else { return }
+            d.bubbles.forEach { $0.timer?.invalidate(); $0.win.orderOut(nil) }
+            d.bubbles.removeAll()
+            d.foldWin?.orderOut(nil); d.foldWin = nil
+            d.inputWin?.orderOut(nil); d.inputWin = nil
+            d.permWin?.orderOut(nil); d.permWin = nil
+            d._pendingActionId = nil
+        }
+        cleanupDuck(duck); cleanupDuck(duck2)
+        if !groupTranscript.isEmpty {
+            let sp = scriptsDir() + "pet-group-chat.py"
+            DispatchQueue.global().async { [weak self] in
+                guard let self else { return }
+                let payload: [String: Any] = ["pets": Config.shared.groupPets, "history": self.groupTranscript]
+                guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/local/bin/python3")
+                t.arguments = [sp, "--summarize"]
+                let inPipe = Pipe(); t.standardInput = inPipe
+                let outPipe = Pipe(); t.standardOutput = outPipe
+                try? t.run()
+                inPipe.fileHandleForWriting.write(jsonData); inPipe.fileHandleForWriting.closeFile()
+                t.waitUntilExit()
+                let d = outPipe.fileHandleForReading.readDataToEndOfFile()
+                if let r = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                   let summary = r["summary"] as? String {
+                    DispatchQueue.main.async {
+                        self.groupChatWC?.appendToLog("System", "", "--- Session Summary ---")
+                        self.groupChatWC?.appendToLog("System", "", summary)
+                        self.groupChatWC?.statusLabel?.stringValue = "Session ended \u{2014} summary saved."
+                    }
+                }
+            }
+        }
+        win?.orderOut(nil); win2?.orderOut(nil); win2 = nil; duck2 = nil
+        guard let s = NSScreen.main else { return }
+        let sf = s.visibleFrame; let sz = 48*cfg.scale
+        let x = sf.midX - sz/2, y = sf.maxY - sz*3
+        win = DuckWindow(contentRect: NSRect(x: x, y: y, width: sz, height: sz), styleMask: [], backing: .buffered, defer: false)
+        duck = DuckView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        win?.contentView = duck; win?.level = cfg.alwaysOnTop ? .floating : .normal
+        win?.orderFrontRegardless(); duck?.loadWindowLevel()
+    }
+
+    func processGroupTurn(userMessage: String) {
+        guard groupActive else { return }
+        var turnCount = 0; let maxTurns = 15
+        groupRoundCount += 1; let currentRound = groupRoundCount
+        func nextPetTurn(lastMessage: [String: Any]) {
+            guard groupActive, turnCount < maxTurns else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.groupChatWC?.appendToLog("System", "", "(discussion paused \u{2014} your turn)")
+                    self?.groupChatWC?.statusLabel?.stringValue = "Waiting for your reply..."
+                }
+                return
+            }
+            turnCount += 1
+            groupCallEngine(lastMessage, roundCount: currentRound) { [weak self] action, msg in
+                DispatchQueue.main.async {
+                    guard let self, self.groupActive else { return }
+                    let from = msg["from"] as? String ?? ""
+                    let to = msg["to"] as? String ?? ""
+                    let content = msg["content"] as? String ?? ""
+                    var transcriptEntry: [String: String] = ["from": from, "to": to, "content": content]
+                    if let artwork = msg["artwork"] as? String { transcriptEntry["artwork"] = artwork }
+                    switch action {
+                    case "reply":
+                        self.showGroupBubble(from: from, text: content)
+                        self.groupTranscript.append(transcriptEntry)
+                        self.groupChatWC?.appendToLog(from, to, content)
+                        if to != "user" {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                nextPetTurn(lastMessage: transcriptEntry)
+                            }
+                        } else {
+                            self.groupChatWC?.statusLabel?.stringValue = "Pets are waiting for you..."
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                                self?.duck?.showTextInput(context: "group")
+                            }
+                        }
+                    case "wait":
+                        self.groupChatWC?.statusLabel?.stringValue = "Waiting for your reply..."
+                        if !transcriptEntry.isEmpty { self.groupTranscript.append(transcriptEntry) }
+                        self.duck?.showTextInput(context: "group")
+                    case "done":
+                        self.stopGroupChat()
+                    default: break
+                    }
+                }
+            }
+        }
+        nextPetTurn(lastMessage: ["from": "user", "content": userMessage])
+    }
+
+    func showGroupBubble(from: String, text: String) {
+        let duckName = Config.shared.groupPets[0]["name"] ?? "Duck"
+        let (source, btype): (DuckView?, String) = from == duckName
+            ? (duck, "thinking") : (duck2, "searching")
+        source?.pushBubble(text: "[\(from)] \(text)", type: btype)
+    }
+
+    func groupCallEngine(_ lastMessage: [String: Any], roundCount: Int, callback: @escaping (String, [String: Any]) -> Void) {
+        let sp = scriptsDir() + "pet-group-chat.py"
+        let payload: [String: Any] = [
+            "pets": Config.shared.groupPets,
+            "history": groupTranscript,
+            "last_message": lastMessage,
+            "round_count": roundCount
+        ]
+        DispatchQueue.global().async { [weak self] in
+            guard let self else { return }
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+                  let jsonStr = String(data: jsonData, encoding: .utf8) else { callback("error", [:]); return }
+            let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/local/bin/python3")
+            t.arguments = [sp]
+            let inPipe = Pipe(); t.standardInput = inPipe
+            let outPipe = Pipe(); t.standardOutput = outPipe
+            try? t.run()
+            inPipe.fileHandleForWriting.write(jsonStr.data(using: .utf8)!)
+            inPipe.fileHandleForWriting.closeFile()
+            t.waitUntilExit()
+            let d = outPipe.fileHandleForReading.readDataToEndOfFile()
+            if let r = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                let action = r["action"] as? String ?? "error"
+                callback(action, r)
+            } else { callback("error", [:]) }
+        }
+    }
+
     @objc func showSpritesheetEditor() { if spritesheetWC == nil{spritesheetWC = SpritesheetEditorWindow()}; spritesheetWC?.showWindow(nil) }
     @objc func toggleTop() { cfg.windowLevel = (cfg.windowLevel + 1) % 3; cfg.save(); duck.setWindowLevel(cfg.windowLevel)
         if let m = statusItem?.menu{for i in m.items where i.action==#selector(toggleTop){i.title = cfg.alwaysOnTop ? "Move to Normal Layer":"Keep on Top";break}}}
