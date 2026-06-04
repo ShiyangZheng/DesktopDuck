@@ -6,7 +6,7 @@ A desktop pet app for macOS — a floating window with an AI-powered duck (or ca
 
 ## Quick Start
 
-### [Homebrew](https://github.com/Homebrew/brew/releases/tag/5.1.15) (recommended)
+### [Homebrew](https://github.com/Homebrew/brew/releases/) (recommended)
 
 Copy-paste the following commands in your terminal:
 
